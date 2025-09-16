@@ -22,6 +22,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
 	platform       string
+	jwtSecret      string
 }
 
 func main() {
@@ -40,6 +41,7 @@ func main() {
 	apiCfg := &apiConfig{
 		dbQueries: dbQueries,
 		platform:  os.Getenv("PLATFORM"),
+		jwtSecret: os.Getenv("JWT_SECRET"),
 	}
 
 	fileServer := http.FileServer(http.Dir("."))
@@ -263,8 +265,7 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	type requestBody struct {
-		Body   string `json:"body"`
-		UserID string `json:"user_id"`
+		Body string `json:"body"`
 	}
 
 	type errorResponse struct {
@@ -278,9 +279,26 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 		CreatedAt string `json:"created_at"`
 		UpdatedAt string `json:"updated_at"`
 	}
+
+	token, err := auth.GetBearerToken(r.Header)
+
+	if err != nil {
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+
+	if err != nil {
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
 	params := &requestBody{}
-	err := json.NewDecoder(r.Body).Decode(params)
-	if err != nil || params.Body == "" || params.UserID == "" {
+
+	err = json.NewDecoder(r.Body).Decode(params)
+
+	if err != nil || params.Body == "" {
 		http.Error(w, "Invalid JSON or params", http.StatusBadRequest)
 		return
 	}
@@ -311,7 +329,7 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 	chirpParams := database.CreateChirpParams{
 		ID:        newID,
 		Body:      cleaned,
-		UserID:    uuid.MustParse(params.UserID),
+		UserID:    userID,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -391,14 +409,16 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type requestBody struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email            string `json:"email"`
+		Password         string `json:"password"`
+		ExpiresInSeconds *int   `json:"expires_in_seconds"`
 	}
 	type responseBody struct {
 		ID        string `json:"id"`
 		Email     string `json:"email"`
 		CreatedAt string `json:"created_at"`
 		UpdatedAt string `json:"updated_at"`
+		Token     string `json:"token"`
 	}
 	params := &requestBody{}
 	err := json.NewDecoder(r.Body).Decode(params)
@@ -419,15 +439,29 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expiresIn := 3600
+
+	if params.ExpiresInSeconds != nil && *params.ExpiresInSeconds > 0 {
+		expiresIn = *params.ExpiresInSeconds
+	} else {
+		expiresIn = 3600
+	}
+
+	token, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(expiresIn)*time.Second)
+	if err != nil {
+		http.Error(w, "Failed to create token", http.StatusInternalServerError)
+		return
+	}
+
 	resp := responseBody{
 		ID:        user.ID.String(),
 		Email:     user.Email,
 		CreatedAt: user.CreatedAt.String(),
 		UpdatedAt: user.UpdatedAt.String(),
+		Token:     token,
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp)
-
 }
