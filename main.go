@@ -62,6 +62,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getChirpByIDHandler)
 
 	mux.HandleFunc("POST /api/users", apiCfg.createUserHandler)
+	mux.HandleFunc("PUT /api/users", apiCfg.updateUserHandler)
 
 	mux.HandleFunc("POST /api/login", apiCfg.loginHandler)
 	mux.HandleFunc("POST /api/refresh", apiCfg.refreshHandler)
@@ -380,11 +381,16 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	hassedPassword, err := auth.HashPassword(params.Password)
+	hashedPassword, err := auth.HashPassword(params.Password)
+
+	if err != nil {
+		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		return
+	}
 
 	user, err := cfg.dbQueries.CreateUser(r.Context(), database.CreateUserParams{
 		Email:          params.Email,
-		HashedPassword: sql.NullString{String: hassedPassword, Valid: true},
+		HashedPassword: sql.NullString{String: hashedPassword, Valid: true},
 	})
 
 	if err != nil {
@@ -401,6 +407,77 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (cfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	tokenStr, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(tokenStr, cfg.jwtSecret)
+	if err != nil {
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	type requestBody struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	type responseBody struct {
+		ID        string `json:"id"`
+		Email     string `json:"email"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+	}
+
+	type errorResponse struct {
+		Error string `json:"error"`
+	}
+
+	params := &requestBody{}
+
+	err = json.NewDecoder(r.Body).Decode(params)
+
+	if err != nil || params.Email == "" || params.Password == "" {
+		http.Error(w, "Invalid JSON or missing email/password", http.StatusBadRequest)
+		return
+	}
+
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		return
+	}
+
+	user, err := cfg.dbQueries.UpdateUser(r.Context(), database.UpdateUserParams{
+		ID:             userID,
+		Email:          params.Email,
+		HashedPassword: sql.NullString{String: hashedPassword, Valid: true},
+	})
+
+	if err != nil {
+		http.Error(w, "Failed to update user", http.StatusInternalServerError)
+		return
+	}
+
+	resp := responseBody{
+		ID:        user.ID.String(),
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt.String(),
+		UpdatedAt: user.UpdatedAt.String(),
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp)
 }
 
