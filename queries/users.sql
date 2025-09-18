@@ -28,4 +28,10 @@ RETURNING *;
 DELETE FROM users;
 
 -- name: GetUserByEmail :one
-SELECT id, email, hashed_password, created_at, updated_at FROM users WHERE email = $1;
+SELECT id, email, hashed_password, created_at, updated_at, is_chirpy_red FROM users WHERE email = $1;
+
+-- name: GetUserByID :one
+SELECT id, email, hashed_password, created_at, updated_at, is_chirpy_red FROM users WHERE id = $1;
+
+-- name: UpgradeUserToChirpyRed :exec
+UPDATE users SET is_chirpy_red = TRUE, updated_at = NOW() WHERE id = $1;

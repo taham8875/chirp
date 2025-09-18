@@ -69,6 +69,8 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", apiCfg.refreshHandler)
 	mux.HandleFunc("POST /api/revoke", apiCfg.revokeHandler)
 
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.polkaWebhookHandler)
+
 	server := &http.Server{
 		Handler: mux,
 		Addr:    ":8080",
@@ -430,10 +432,11 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		Password string `json:"password"`
 	}
 	type responseBody struct {
-		ID        string `json:"id"`
-		Email     string `json:"email"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
+		ID          string `json:"id"`
+		Email       string `json:"email"`
+		IsChirpyRed bool   `json:"is_chirpy_red"`
+		CreatedAt   string `json:"created_at"`
+		UpdatedAt   string `json:"updated_at"`
 	}
 	params := &requestBody{}
 	err := json.NewDecoder(r.Body).Decode(params)
@@ -460,10 +463,11 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	resp := responseBody{
-		ID:        user.ID.String(),
-		Email:     user.Email,
-		CreatedAt: user.CreatedAt.String(),
-		UpdatedAt: user.UpdatedAt.String(),
+		ID:          user.ID.String(),
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
+		CreatedAt:   user.CreatedAt.String(),
+		UpdatedAt:   user.UpdatedAt.String(),
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -494,10 +498,11 @@ func (cfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Request) 
 		Password string `json:"password"`
 	}
 	type responseBody struct {
-		ID        string `json:"id"`
-		Email     string `json:"email"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
+		ID          string `json:"id"`
+		Email       string `json:"email"`
+		IsChirpyRed bool   `json:"is_chirpy_red"`
+		CreatedAt   string `json:"created_at"`
+		UpdatedAt   string `json:"updated_at"`
 	}
 
 	type errorResponse struct {
@@ -531,10 +536,11 @@ func (cfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	resp := responseBody{
-		ID:        user.ID.String(),
-		Email:     user.Email,
-		CreatedAt: user.CreatedAt.String(),
-		UpdatedAt: user.UpdatedAt.String(),
+		ID:          user.ID.String(),
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
+		CreatedAt:   user.CreatedAt.String(),
+		UpdatedAt:   user.UpdatedAt.String(),
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -555,6 +561,7 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 	type responseBody struct {
 		ID           string `json:"id"`
 		Email        string `json:"email"`
+		IsChirpyRed  bool   `json:"is_chirpy_red"`
 		CreatedAt    string `json:"created_at"`
 		UpdatedAt    string `json:"updated_at"`
 		Token        string `json:"token"`
@@ -604,6 +611,7 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 	resp := responseBody{
 		ID:           user.ID.String(),
 		Email:        user.Email,
+		IsChirpyRed:  user.IsChirpyRed.Bool,
 		CreatedAt:    user.CreatedAt.String(),
 		UpdatedAt:    user.UpdatedAt.String(),
 		Token:        token,
@@ -667,6 +675,59 @@ func (cfg *apiConfig) revokeHandler(w http.ResponseWriter, r *http.Request) {
 	err = cfg.dbQueries.RevokeRefreshToken(r.Context(), tokenStr)
 	if err != nil {
 		http.Error(w, "Failed to revoke token: "+err.Error(), http.StatusInternalServerError)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (cfg *apiConfig) polkaWebhookHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type webhookRequest struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+
+	params := &webhookRequest{}
+	err := json.NewDecoder(r.Body).Decode(params)
+	if err != nil || params.Event == "" || params.Data.UserID == "" {
+		http.Error(w, "Invalid JSON or missing event/user_id", http.StatusBadRequest)
+		return
+	}
+
+	if params.Event != "user.upgraded" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	userID, err := uuid.Parse(params.Data.UserID)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	_, err = cfg.dbQueries.GetUserByID(r.Context(), userID)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.Error(w, "Failed to fetch user: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// upgrade the user to chirpy red
+	err = cfg.dbQueries.UpgradeUserToChirpyRed(r.Context(), userID)
+
+	if err != nil {
+		http.Error(w, "Failed to upgrade user: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
