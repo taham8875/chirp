@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -230,6 +231,27 @@ func (cfg *apiConfig) getChirpHandler(w http.ResponseWriter, r *http.Request) {
 			UserID:    chirp.UserID.String(),
 			CreatedAt: chirp.CreatedAt,
 			UpdatedAt: chirp.UpdatedAt,
+		})
+	}
+
+	sortParam := r.URL.Query().Get("sort")
+
+	if sortParam == "" {
+		sortParam = "asc"
+	}
+
+	if sortParam != "asc" && sortParam != "desc" {
+		http.Error(w, "Invalid sort parameter, must be 'asc' or 'desc'", http.StatusBadRequest)
+		return
+	}
+
+	if sortParam == "asc" {
+		sort.Slice(resp, func(i, j int) bool {
+			return resp[i].CreatedAt.Before(resp[j].CreatedAt)
+		})
+	} else {
+		sort.Slice(resp, func(i, j int) bool {
+			return resp[i].CreatedAt.After(resp[j].CreatedAt)
 		})
 	}
 
