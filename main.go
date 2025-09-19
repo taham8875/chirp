@@ -191,7 +191,22 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) getChirpHandler(w http.ResponseWriter, r *http.Request) {
-	chirps, err := cfg.dbQueries.GetChirps(r.Context())
+	authorIDStr := r.URL.Query().Get("author_id")
+
+	var chirps []database.Chirp
+	var err error
+
+	if authorIDStr != "" {
+		authorID, err := uuid.Parse(authorIDStr)
+		if err != nil {
+			http.Error(w, "Invalid author ID", http.StatusBadRequest)
+			return
+		}
+
+		chirps, err = cfg.dbQueries.GetChirpsByAuthor(r.Context(), authorID)
+	} else {
+		chirps, err = cfg.dbQueries.GetChirps(r.Context())
+	}
 
 	if err != nil {
 		http.Error(w, "Failed to fetch chirps", http.StatusInternalServerError)
@@ -613,7 +628,7 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 	resp := responseBody{
 		ID:           user.ID.String(),
 		Email:        user.Email,
-		IsChirpyRed:  user.IsChirpyRed.Bool,
+		IsChirpyRed:  user.IsChirpyRed,
 		CreatedAt:    user.CreatedAt.String(),
 		UpdatedAt:    user.UpdatedAt.String(),
 		Token:        token,
