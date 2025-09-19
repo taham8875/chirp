@@ -23,6 +23,7 @@ type apiConfig struct {
 	dbQueries      *database.Queries
 	platform       string
 	jwtSecret      string
+	polkaKey       string
 }
 
 func main() {
@@ -42,6 +43,7 @@ func main() {
 		dbQueries: dbQueries,
 		platform:  os.Getenv("PLATFORM"),
 		jwtSecret: os.Getenv("JWT_SECRET"),
+		polkaKey:  os.Getenv("POLKA_KEY"),
 	}
 
 	fileServer := http.FileServer(http.Dir("."))
@@ -686,6 +688,18 @@ func (cfg *apiConfig) polkaWebhookHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	apiKey, err := auth.GetApiKey(r.Header)
+
+	if err != nil {
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if apiKey != cfg.polkaKey {
+		http.Error(w, "Unauthorized: invalid API key", http.StatusUnauthorized)
+		return
+	}
+
 	type webhookRequest struct {
 		Event string `json:"event"`
 		Data  struct {
@@ -694,7 +708,7 @@ func (cfg *apiConfig) polkaWebhookHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	params := &webhookRequest{}
-	err := json.NewDecoder(r.Body).Decode(params)
+	err = json.NewDecoder(r.Body).Decode(params)
 	if err != nil || params.Event == "" || params.Data.UserID == "" {
 		http.Error(w, "Invalid JSON or missing event/user_id", http.StatusBadRequest)
 		return

@@ -69,7 +69,7 @@ type GetUserByEmailRow struct {
 	HashedPassword sql.NullString
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-	IsChirpyRed    sql.NullBool
+	IsChirpyRed    bool
 }
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
@@ -96,7 +96,7 @@ type GetUserByIDRow struct {
 	HashedPassword sql.NullString
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-	IsChirpyRed    sql.NullBool
+	IsChirpyRed    bool
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow, error) {
